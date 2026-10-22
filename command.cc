@@ -31,17 +31,78 @@
 
 void parse(std::vector<Token> &tokens)
 {
-    Command currentCommand;
+    Command &currentCommand = Command::_currentCommand;
     SimpleCommand *currentSimpleCommand = new SimpleCommand();
 
-    currentCommand.execute();
-    /*
-      Implement this function 
-      you must parse for all possible tokens scenario
-      right now command.execute only print the format , you will inject it in your logic.
+    for (size_t i = 0; i < tokens.size(); i++)
+    {
+        Token token = tokens[i];
 
-    */
+        switch (token.type)
+        {
+            case TOKEN_COMMAND:
+            case TOKEN_ARGUMENT:
+                currentSimpleCommand->insertArgument(strdup(token.value.c_str()));
+                break;
+
+            case TOKEN_PIPE:
+                currentCommand.insertSimpleCommand(currentSimpleCommand);
+                currentSimpleCommand = new SimpleCommand();
+                break;
+
+            case TOKEN_REDIRECT:
+                currentCommand._outFile = strdup(tokens[i + 1].value.c_str());
+                i++;
+                break;
+
+            case TOKEN_APPEND:
+                currentCommand._outFile = strdup(tokens[i + 1].value.c_str());
+                currentCommand._append = 1;
+                i++;
+                break;
+
+            case TOKEN_INPUT:
+                currentCommand._inputFile = strdup(tokens[i + 1].value.c_str());
+                i++;
+                break;
+
+            case TOKEN_ERROR:
+                currentCommand._errFile = strdup(tokens[i + 1].value.c_str());
+                i++;
+                break;
+
+            case TOKEN_REDIRECT_AND_ERROR:
+                currentCommand._outFile = strdup(tokens[i + 1].value.c_str());
+                currentCommand._errFile = strdup(tokens[i + 1].value.c_str());
+                currentCommand._out_error = 1;
+                currentCommand._append = 1;
+                i++;
+                break;
+
+            case TOKEN_BACKGROUND:
+                currentCommand._background = 1;
+                break;
+
+            case TOKEN_EOF:
+                if (currentSimpleCommand->_numberOfArguments > 0)
+                {
+                    currentCommand.insertSimpleCommand(currentSimpleCommand);
+                }
+                
+                if (currentCommand._numberOfSimpleCommands > 0)
+                {
+                    currentCommand.execute();
+                }
+                else
+                {
+                    currentCommand.clear();
+                    currentCommand.prompt();
+                }
+                break;
+        }
+    }
 }
+
 
 SimpleCommand::SimpleCommand()
 {
@@ -68,10 +129,10 @@ void SimpleCommand::insertArgument(char *argument)
 Command::Command()
 {
     _numberOfAvailableSimpleCommands = 1;
-    _simpleCommands = (SimpleCommand **)
-        malloc(_numberOfSimpleCommands * sizeof(SimpleCommand *));
-
     _numberOfSimpleCommands = 0;
+    _simpleCommands = (SimpleCommand **)
+        malloc(_numberOfAvailableSimpleCommands * sizeof(SimpleCommand *));
+
     _outFile = 0;
     _inputFile = 0;
     _errFile = 0;
