@@ -216,14 +216,92 @@ void Command::print()
 void Command::execute()
 {
     print();
-    /*
-        Write your code here
-    */
+
+    if (_numberOfSimpleCommands == 0) {
+        prompt();
+        return;
+    }
+
+    int original_keyboard = dup(0);
+    int original_screen   = dup(1);
+    int original_error    = dup(2);
+
+    int current_input;
+    if (_inputFile != NULL) {
+        current_input = open(_inputFile, O_RDONLY);
+    } else {
+        current_input = dup(original_keyboard);
+    }
+
+    int child_id;
+
+    for (int i = 0; i < _numberOfSimpleCommands; i++) {
+        
+        dup2(current_input, 0);
+        close(current_input); 
+
+        int current_output;
+
+        if (i == _numberOfSimpleCommands - 1) {
+            
+            if (_outFile != NULL) {
+                if (_append == 1) {
+                    current_output = open(_outFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
+                } else {
+                    current_output = open(_outFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                }
+            } else {
+                current_output = dup(original_screen);
+            }
+
+            if (_errFile != NULL) {
+                int error_output;
+                if (_append == 1) {
+                    error_output = open(_errFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
+                } else {
+                    error_output = open(_errFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                }
+                dup2(error_output, 2); 
+                close(error_output);
+            }
+
+        } 
+        else {
+            int my_pipe[2];
+            pipe(my_pipe);
+            
+            current_output = my_pipe[1]; 
+            current_input  = my_pipe[0]; 
+        }
+
+        dup2(current_output, 1);
+        close(current_output);
+
+        child_id = fork();
+
+        if (child_id == 0) {
+            execvp(_simpleCommands[i]->_arguments[0], _simpleCommands[i]->_arguments);
+            perror("Command not found");
+            exit(1);
+        }
+    } 
+
+    dup2(original_keyboard, 0);
+    dup2(original_screen, 1);
+    dup2(original_error, 2);
+    
+    close(original_keyboard);
+    close(original_screen);
+    close(original_error);
+
+    if (_background == 0) {
+        waitpid(child_id, NULL, 0);
+    }
 
     clear();
     prompt();
 }
-
+    
 void Command::prompt()
 {
     printf("myshell>");
@@ -236,7 +314,6 @@ void Command::prompt()
         parse(tokens);
     }
 }
-
 Command Command::_currentCommand;
 SimpleCommand *Command::_currentSimpleCommand;
 
