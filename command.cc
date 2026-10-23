@@ -88,6 +88,11 @@ void parse(std::vector<Token> &tokens)
                 {
                     currentCommand.insertSimpleCommand(currentSimpleCommand);
                 }
+                else
+                {
+                    free(currentSimpleCommand->_arguments);
+                    delete currentSimpleCommand;
+                }
                 
                 if (currentCommand._numberOfSimpleCommands > 0)
                 {
@@ -96,12 +101,12 @@ void parse(std::vector<Token> &tokens)
                 else
                 {
                     currentCommand.clear();
-                    currentCommand.prompt();
                 }
-                break;
+                return;
         }
     }
 }
+     
 
 
 SimpleCommand::SimpleCommand()
@@ -137,6 +142,8 @@ Command::Command()
     _inputFile = 0;
     _errFile = 0;
     _background = 0;
+    _append = 0;
+    _out_error = 0;
 }
 
 void Command::insertSimpleCommand(SimpleCommand *simpleCommand)
@@ -185,6 +192,8 @@ void Command::clear()
     _inputFile = 0;
     _errFile = 0;
     _background = 0;
+    _append = 0;
+    _out_error = 0;
 }
 
 void Command::print()
@@ -218,7 +227,22 @@ void Command::execute()
     print();
 
     if (_numberOfSimpleCommands == 0) {
-        prompt();
+        return;
+    }
+
+    if (strcmp(_simpleCommands[0]->_arguments[0], "exit") == 0) {
+        printf("Good bye!!\n");
+        exit(0);
+    }
+
+    if (strcmp(_simpleCommands[0]->_arguments[0], "cd") == 0) {
+        if (_simpleCommands[0]->_arguments[1] != NULL) {
+            chdir(_simpleCommands[0]->_arguments[1]);
+        } else {
+            chdir(getenv("HOME"));
+        }
+        
+        clear();
         return;
     }
 
@@ -299,17 +323,23 @@ void Command::execute()
     }
 
     clear();
-    prompt();
 }
+         
     
 void Command::prompt()
 {
-    printf("myshell>");
-    fflush(stdout);
     std::string input;
+
     while (true)
     {
-        std::getline(std::cin, input); 
+        printf("myshell>");
+        fflush(stdout);
+
+        if (!std::getline(std::cin, input))
+        {
+            break;
+        }
+
         std::vector<Token> tokens = tokenize(input);
         parse(tokens);
     }
