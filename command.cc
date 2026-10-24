@@ -318,76 +318,197 @@ void Command::execute()
 {
     print();
 
-    if (_numberOfSimpleCommands == 0) {
+    if (_numberOfSimpleCommands == 0)
+    {
         return;
     }
 
-    if (strcmp(_simpleCommands[0]->_arguments[0], "exit") == 0) {
+    if (strcmp(_simpleCommands[0]->_arguments[0], "exit") == 0)
+    {
         printf("Good bye!!\n");
         exit(0);
     }
 
-    if (strcmp(_simpleCommands[0]->_arguments[0], "cd") == 0) {
-        if (_simpleCommands[0]->_arguments[1] != NULL) {
-            chdir(_simpleCommands[0]->_arguments[1]);
-        } else {
-            chdir(getenv("HOME"));
+    if (strcmp(_simpleCommands[0]->_arguments[0], "cd") == 0)
+    {
+        if (_simpleCommands[0]->_numberOfArguments > 2)
+        {
+            fprintf(stderr, "cd: too many arguments\n");
         }
-        
+        else
+        {
+            const char *directory = _simpleCommands[0]->_arguments[1];
+
+            if (directory == NULL)
+            {
+                directory = getenv("HOME");
+            }
+
+            if (directory == NULL)
+            {
+                fprintf(stderr, "cd: HOME is not set\n");
+            }
+            else if (chdir(directory) == -1)
+            {
+                perror("cd");
+            }
+        }
+
         clear();
         return;
     }
 
     int original_keyboard = dup(0);
-    int original_screen   = dup(1);
-    int original_error    = dup(2);
+    int original_screen = dup(1);
+    int original_error = dup(2);
+
+    if (original_keyboard == -1 ||
+        original_screen == -1 ||
+        original_error == -1)
+    {
+        perror("dup");
+
+        if (original_keyboard != -1)
+        {
+            close(original_keyboard);
+        }
+
+        if (original_screen != -1)
+        {
+            close(original_screen);
+        }
+
+        if (original_error != -1)
+        {
+            close(original_error);
+        }
+
+        clear();
+        return;
+    }
 
     int current_input;
-    if (_inputFile != NULL) {
+
+    if (_inputFile != NULL)
+    {
         current_input = open(_inputFile, O_RDONLY);
-    } else {
+    }
+    else
+    {
         current_input = dup(original_keyboard);
+    }
+
+    if (current_input == -1)
+    {
+        if (_inputFile != NULL)
+        {
+            perror(_inputFile);
+        }
+        else
+        {
+            perror("dup input");
+        }
+
+        close(original_keyboard);
+        close(original_screen);
+        close(original_error);
+
+        clear();
+        return;
     }
 
     int child_id;
 
-    for (int i = 0; i < _numberOfSimpleCommands; i++) {
-        
+    for (int i = 0; i < _numberOfSimpleCommands; i++)
+    {
         dup2(current_input, 0);
-        close(current_input); 
+        close(current_input);
 
         int current_output;
 
-        if (i == _numberOfSimpleCommands - 1) {
-            
-            if (_outFile != NULL) {
-                if (_append == 1) {
-                    current_output = open(_outFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
-                } else {
-                    current_output = open(_outFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (i == _numberOfSimpleCommands - 1)
+        {
+            if (_outFile != NULL)
+            {
+                if (_append == 1)
+                {
+                    current_output = open(
+                        _outFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
                 }
-            } else {
+                else
+                {
+                    current_output = open(
+                        _outFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                }
+
+                if (current_output == -1)
+                {
+                    perror(_outFile);
+
+                    dup2(original_keyboard, 0);
+                    dup2(original_screen, 1);
+                    dup2(original_error, 2);
+
+                    close(original_keyboard);
+                    close(original_screen);
+                    close(original_error);
+
+                    clear();
+                    return;
+                }
+            }
+            else
+            {
                 current_output = dup(original_screen);
             }
 
-            if (_errFile != NULL) {
+            if (_errFile != NULL)
+            {
                 int error_output;
-                if (_append == 1) {
-                    error_output = open(_errFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
-                } else {
-                    error_output = open(_errFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+
+                if (_append == 1)
+                {
+                    error_output = open(
+                        _errFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
                 }
-                dup2(error_output, 2); 
+                else
+                {
+                    error_output = open(
+                        _errFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                }
+
+                if (error_output == -1)
+                {
+                    perror(_errFile);
+
+                    if (current_output != -1)
+                    {
+                        close(current_output);
+                    }
+
+                    dup2(original_keyboard, 0);
+                    dup2(original_screen, 1);
+                    dup2(original_error, 2);
+
+                    close(original_keyboard);
+                    close(original_screen);
+                    close(original_error);
+
+                    clear();
+                    return;
+                }
+
+                dup2(error_output, 2);
                 close(error_output);
             }
-
-        } 
-        else {
+        }
+        else
+        {
             int my_pipe[2];
             pipe(my_pipe);
-            
-            current_output = my_pipe[1]; 
-            current_input  = my_pipe[0]; 
+
+            current_output = my_pipe[1];
+            current_input = my_pipe[0];
         }
 
         dup2(current_output, 1);
@@ -395,29 +516,33 @@ void Command::execute()
 
         child_id = fork();
 
-        if (child_id == 0) {
-            execvp(_simpleCommands[i]->_arguments[0], _simpleCommands[i]->_arguments);
-            perror("Command not found");
-            exit(1);
+        if (child_id == 0)
+        {
+            execvp(
+                _simpleCommands[i]->_arguments[0],
+                _simpleCommands[i]->_arguments);
+
+            perror(_simpleCommands[i]->_arguments[0]);
+            _exit(127);
         }
-    } 
+    }
 
     dup2(original_keyboard, 0);
     dup2(original_screen, 1);
     dup2(original_error, 2);
-    
+
     close(original_keyboard);
     close(original_screen);
     close(original_error);
 
-    if (_background == 0) {
+    if (_background == 0)
+    {
         waitpid(child_id, NULL, 0);
     }
 
     clear();
 }
-         
-    
+
 void Command::prompt()
 {
     std::string input;
