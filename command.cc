@@ -128,8 +128,33 @@ void parse(std::vector<Token> &tokens)
         {
             case TOKEN_COMMAND:
             case TOKEN_ARGUMENT:
-                currentSimpleCommand->insertArgument(strdup(token.value.c_str()));
+            {
+                if (token.value.find('*') != std::string::npos || token.value.find('?') != std::string::npos)
+                {
+                    glob_t glob_result;
+                    memset(&glob_result, 0, sizeof(glob_t));
+                    
+                    int return_value = glob(token.value.c_str(), GLOB_NOCHECK, NULL, &glob_result);
+                    
+                    if (return_value == 0)
+                    {
+                        for (size_t k = 0; k < glob_result.gl_pathc; ++k)
+                        {
+                            currentSimpleCommand->insertArgument(strdup(glob_result.gl_pathv[k]));
+                        }
+                    }
+                    else
+                    {
+                        currentSimpleCommand->insertArgument(strdup(token.value.c_str()));
+                    }
+                    globfree(&glob_result);
+                }
+                else
+                {
+                    currentSimpleCommand->insertArgument(strdup(token.value.c_str()));
+                }
                 break;
+            }
 
             case TOKEN_PIPE:
                 if (currentSimpleCommand->_numberOfArguments == 0)
