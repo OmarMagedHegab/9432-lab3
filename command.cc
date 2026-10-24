@@ -28,21 +28,27 @@
 #include "command.h"
 #include "tokenizer.h"
 #include <errno.h>
-
 void parse(std::vector<Token> &tokens)
 {
     Command &currentCommand = Command::_currentCommand;
     SimpleCommand *currentSimpleCommand = new SimpleCommand();
 
+    auto syntaxError = [&](const char *message)
+    {
+        fprintf(stderr, "Syntax error: %s\n", message);
+        for (int j = 0; j < currentSimpleCommand->_numberOfArguments; j++)
+            free(currentSimpleCommand->_arguments[j]);
+        free(currentSimpleCommand->_arguments);
+        delete currentSimpleCommand;
+        currentCommand.clear();
+    };
+
     for (size_t i = 0; i < tokens.size(); i++)
     {
         Token token = tokens[i];
-
         bool isRedirection =
-            token.type == TOKEN_REDIRECT ||
-            token.type == TOKEN_APPEND ||
-            token.type == TOKEN_INPUT ||
-            token.type == TOKEN_ERROR ||
+            token.type == TOKEN_REDIRECT || token.type == TOKEN_APPEND ||
+            token.type == TOKEN_INPUT || token.type == TOKEN_ERROR ||
             token.type == TOKEN_REDIRECT_AND_ERROR;
 
         if (isRedirection)
@@ -51,47 +57,22 @@ void parse(std::vector<Token> &tokens)
                 (tokens[i + 1].type != TOKEN_ARGUMENT &&
                  tokens[i + 1].type != TOKEN_COMMAND))
             {
-                fprintf(stderr, "Syntax error: expected filename after %s\n", token.value.c_str());
-
-                for (int j = 0; j < currentSimpleCommand->_numberOfArguments; j++)
-                {
-                    free(currentSimpleCommand->_arguments[j]);
-                }
-
-                free(currentSimpleCommand->_arguments);
-                delete currentSimpleCommand;
-
-                currentCommand.clear();
+                std::string message = "expected filename after " + token.value;
+                syntaxError(message.c_str());
                 return;
             }
 
-            bool redirectsOutput =
-                token.type == TOKEN_REDIRECT ||
-                token.type == TOKEN_APPEND ||
-                token.type == TOKEN_REDIRECT_AND_ERROR;
-
-            bool redirectsInput =
-                token.type == TOKEN_INPUT;
-
-            bool redirectsError =
-                token.type == TOKEN_ERROR ||
+            bool redirectsOutput = token.type == TOKEN_REDIRECT ||
+                token.type == TOKEN_APPEND || token.type == TOKEN_REDIRECT_AND_ERROR;
+            bool redirectsInput = token.type == TOKEN_INPUT;
+            bool redirectsError = token.type == TOKEN_ERROR ||
                 token.type == TOKEN_REDIRECT_AND_ERROR;
 
             if ((redirectsOutput && currentCommand._outFile != NULL) ||
                 (redirectsInput && currentCommand._inputFile != NULL) ||
                 (redirectsError && currentCommand._errFile != NULL))
             {
-                fprintf(stderr, "Syntax error: repeated redirection for the same stream\n");
-
-                for (int j = 0; j < currentSimpleCommand->_numberOfArguments; j++)
-                {
-                    free(currentSimpleCommand->_arguments[j]);
-                }
-
-                free(currentSimpleCommand->_arguments);
-                delete currentSimpleCommand;
-
-                currentCommand.clear();
+                syntaxError("repeated redirection for the same stream");
                 return;
             }
         }
@@ -106,10 +87,7 @@ void parse(std::vector<Token> &tokens)
             case TOKEN_PIPE:
                 if (currentSimpleCommand->_numberOfArguments == 0)
                 {
-                    fprintf(stderr, "Syntax error: missing command before pipe\n");
-                    free(currentSimpleCommand->_arguments);
-                    delete currentSimpleCommand;
-                    currentCommand.clear();
+                    syntaxError("missing command before pipe");
                     return;
                 }
                 currentCommand.insertSimpleCommand(currentSimpleCommand);
@@ -117,53 +95,36 @@ void parse(std::vector<Token> &tokens)
                 break;
 
             case TOKEN_REDIRECT:
-                currentCommand._outFile = strdup(tokens[i + 1].value.c_str());
-                i++;
+                currentCommand._outFile = strdup(tokens[++i].value.c_str());
                 break;
 
             case TOKEN_APPEND:
-                currentCommand._outFile = strdup(tokens[i + 1].value.c_str());
+                currentCommand._outFile = strdup(tokens[++i].value.c_str());
                 currentCommand._append = 1;
-                i++;
                 break;
 
             case TOKEN_INPUT:
-                currentCommand._inputFile = strdup(tokens[i + 1].value.c_str());
-                i++;
+                currentCommand._inputFile = strdup(tokens[++i].value.c_str());
                 break;
 
             case TOKEN_ERROR:
-                currentCommand._errFile = strdup(tokens[i + 1].value.c_str());
-                i++;
+                currentCommand._errFile = strdup(tokens[++i].value.c_str());
                 break;
 
             case TOKEN_REDIRECT_AND_ERROR:
-                currentCommand._outFile = strdup(tokens[i + 1].value.c_str());
-                currentCommand._errFile = strdup(tokens[i + 1].value.c_str());
+                currentCommand._outFile = strdup(tokens[++i].value.c_str());
+                currentCommand._errFile = strdup(tokens[i].value.c_str());
                 currentCommand._out_error = 1;
                 currentCommand._append = 1;
-                i++;
                 break;
 
             case TOKEN_BACKGROUND:
                 if (currentSimpleCommand->_numberOfArguments == 0 ||
-                    i + 1 >= tokens.size() ||
-                    tokens[i + 1].type != TOKEN_EOF)
+                    i + 1 >= tokens.size() || tokens[i + 1].type != TOKEN_EOF)
                 {
-                    fprintf(stderr, "Syntax error: & must follow a command and end the line\n");
-
-                    for (int j = 0; j < currentSimpleCommand->_numberOfArguments; j++)
-                    {
-                        free(currentSimpleCommand->_arguments[j]);
-                    }
-
-                    free(currentSimpleCommand->_arguments);
-                    delete currentSimpleCommand;
-
-                    currentCommand.clear();
+                    syntaxError("& must follow a command and end the line");
                     return;
                 }
-
                 currentCommand._background = 1;
                 break;
 
@@ -171,17 +132,11 @@ void parse(std::vector<Token> &tokens)
                 if (currentSimpleCommand->_numberOfArguments == 0 &&
                     currentCommand._numberOfSimpleCommands > 0)
                 {
-                    fprintf(stderr, "Syntax error: missing command after pipe\n");
-                    free(currentSimpleCommand->_arguments);
-                    delete currentSimpleCommand;
-                    currentCommand.clear();
+                    syntaxError("missing command after pipe");
                     return;
                 }
-
                 if (currentSimpleCommand->_numberOfArguments > 0)
-                {
                     currentCommand.insertSimpleCommand(currentSimpleCommand);
-                }
                 else
                 {
                     free(currentSimpleCommand->_arguments);
@@ -189,19 +144,13 @@ void parse(std::vector<Token> &tokens)
                 }
 
                 if (currentCommand._numberOfSimpleCommands > 0)
-                {
                     currentCommand.execute();
-                }
                 else
-                {
                     currentCommand.clear();
-                }
-
                 return;
         }
     }
-}     
-
+}
 SimpleCommand::SimpleCommand()
 {
     _numberOfAvailableArguments = 5;
@@ -314,7 +263,6 @@ void Command::print()
            ,_background ? "YES" : "NO");
     printf("\n\n");
 }
-
 void Command::execute()
 {
     if (_numberOfSimpleCommands == 0)
@@ -333,26 +281,18 @@ void Command::execute()
             fprintf(stderr, "cd: too many arguments\n");
             return 1;
         }
-
         const char *directory = command->_arguments[1];
-
-        if (directory == NULL)
-        {
-            directory = getenv("HOME");
-        }
-
+        if (directory == NULL) directory = getenv("HOME");
         if (directory == NULL)
         {
             fprintf(stderr, "cd: HOME is not set\n");
             return 1;
         }
-
         if (chdir(directory) == -1)
         {
             perror("cd");
             return 1;
         }
-
         return 0;
     };
 
@@ -362,97 +302,60 @@ void Command::execute()
 
     auto closeDescriptors = [&]()
     {
-        if (current_input != -1)
-        {
-            close(current_input);
-            current_input = -1;
-        }
+        if (current_input != -1) close(current_input);
+        if (final_output != -1) close(final_output);
+        if (error_output != -1) close(error_output);
+        current_input = final_output = error_output = -1;
+    };
 
-        if (final_output != -1)
-        {
-            close(final_output);
-            final_output = -1;
-        }
-
-        if (error_output != -1)
-        {
-            close(error_output);
-            error_output = -1;
-        }
+    auto executionError = [&](const char *message)
+    {
+        perror(message);
+        closeDescriptors();
+        clear();
     };
 
     if (_inputFile != NULL)
-    {
         current_input = open(_inputFile, O_RDONLY);
-    }
     else
-    {
         current_input = dup(STDIN_FILENO);
-    }
 
     if (current_input == -1)
     {
-        perror(_inputFile != NULL ? _inputFile : "dup input");
-        closeDescriptors();
-        clear();
+        executionError(_inputFile != NULL ? _inputFile : "dup input");
         return;
     }
 
     if (_outFile != NULL)
     {
         int flags = O_WRONLY | O_CREAT;
-
-        if (_append == 1)
-        {
-            flags |= O_APPEND;
-        }
-        else
-        {
-            flags |= O_TRUNC;
-        }
-
+        flags |= (_append == 1) ? O_APPEND : O_TRUNC;
         final_output = open(_outFile, flags, 0666);
     }
     else
-    {
         final_output = dup(STDOUT_FILENO);
-    }
 
     if (final_output == -1)
     {
-        perror(_outFile != NULL ? _outFile : "dup output");
-        closeDescriptors();
-        clear();
+        executionError(_outFile != NULL ? _outFile : "dup output");
         return;
     }
 
     if (_out_error == 1)
-    {
         error_output = dup(final_output);
-    }
     else if (_errFile != NULL)
-    {
-        error_output = open(
-            _errFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    }
+        error_output = open(_errFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     else
-    {
         error_output = dup(STDERR_FILENO);
-    }
 
     if (error_output == -1)
     {
-        perror(_errFile != NULL ? _errFile : "dup error");
-        closeDescriptors();
-        clear();
+        executionError(_errFile != NULL ? _errFile : "dup error");
         return;
     }
 
-    bool isExit =
-        strcmp(_simpleCommands[0]->_arguments[0], "exit") == 0;
-
-    bool isCd =
-        strcmp(_simpleCommands[0]->_arguments[0], "cd") == 0;
+    bool isExit = strcmp(_simpleCommands[0]->_arguments[0], "exit") == 0;
+    bool isCd = strcmp(_simpleCommands[0]->_arguments[0], "cd") == 0;
 
     if (_numberOfSimpleCommands == 1 && (isExit || isCd))
     {
@@ -460,16 +363,12 @@ void Command::execute()
         int original_screen = dup(STDOUT_FILENO);
         int original_error = dup(STDERR_FILENO);
 
-        if (original_keyboard == -1 ||
-            original_screen == -1 ||
-            original_error == -1)
+        if (original_keyboard == -1 || original_screen == -1 || original_error == -1)
         {
             perror("dup");
-
             if (original_keyboard != -1) close(original_keyboard);
             if (original_screen != -1) close(original_screen);
             if (original_error != -1) close(original_error);
-
             closeDescriptors();
             clear();
             return;
@@ -480,49 +379,22 @@ void Command::execute()
             dup2(final_output, STDOUT_FILENO) != -1 &&
             dup2(error_output, STDERR_FILENO) != -1;
 
-        if (!redirected)
-        {
-            perror("dup2");
-        }
-        else if (isExit)
-        {
-            printf("Good bye!!\n");
-        }
-        else
-        {
-            changeDirectory(_simpleCommands[0]);
-        }
+        if (!redirected) perror("dup2");
+        else if (isExit) printf("Good bye!!\n");
+        else changeDirectory(_simpleCommands[0]);
 
         fflush(stdout);
         fflush(stderr);
-
-        if (dup2(original_keyboard, STDIN_FILENO) == -1)
-        {
-            perror("restore input");
-        }
-
-        if (dup2(original_screen, STDOUT_FILENO) == -1)
-        {
-            perror("restore output");
-        }
-
-        if (dup2(original_error, STDERR_FILENO) == -1)
-        {
-            perror("restore error");
-        }
-
+        if (dup2(original_keyboard, STDIN_FILENO) == -1) perror("restore input");
+        if (dup2(original_screen, STDOUT_FILENO) == -1) perror("restore output");
+        if (dup2(original_error, STDERR_FILENO) == -1) perror("restore error");
         close(original_keyboard);
         close(original_screen);
         close(original_error);
-
         closeDescriptors();
         clear();
 
-        if (isExit && redirected)
-        {
-            exit(0);
-        }
-
+        if (isExit && redirected) exit(0);
         return;
     }
 
@@ -542,14 +414,11 @@ void Command::execute()
         }
 
         pid_t child_id = fork();
-
         if (child_id == -1)
         {
             perror("fork");
-
             if (next_pipe[0] != -1) close(next_pipe[0]);
             if (next_pipe[1] != -1) close(next_pipe[1]);
-
             executionFailed = true;
             break;
         }
@@ -557,14 +426,8 @@ void Command::execute()
         if (child_id == 0)
         {
             signal(SIGINT, SIG_DFL);
-
-            if (next_pipe[0] != -1)
-            {
-                close(next_pipe[0]);
-            }
-
-            int current_output =
-                hasNextCommand ? next_pipe[1] : final_output;
+            if (next_pipe[0] != -1) close(next_pipe[0]);
+            int current_output = hasNextCommand ? next_pipe[1] : final_output;
 
             if (dup2(current_input, STDIN_FILENO) == -1 ||
                 dup2(current_output, STDOUT_FILENO) == -1 ||
@@ -574,36 +437,21 @@ void Command::execute()
                 _exit(1);
             }
 
-            if (next_pipe[1] != -1)
-            {
-                close(next_pipe[1]);
-            }
-
+            if (next_pipe[1] != -1) close(next_pipe[1]);
             closeDescriptors();
-
             SimpleCommand *command = _simpleCommands[i];
-
-            if (strcmp(command->_arguments[0], "exit") == 0)
-            {
-                _exit(0);
-            }
-
+            if (strcmp(command->_arguments[0], "exit") == 0) _exit(0);
             if (strcmp(command->_arguments[0], "cd") == 0)
-            {
                 _exit(changeDirectory(command));
-            }
 
             execvp(command->_arguments[0], command->_arguments);
-
             perror(command->_arguments[0]);
             _exit(127);
         }
 
         children.push_back(child_id);
-
         close(current_input);
         current_input = -1;
-
         if (hasNextCommand)
         {
             close(next_pipe[1]);
@@ -612,13 +460,10 @@ void Command::execute()
     }
 
     closeDescriptors();
-
     if (executionFailed)
     {
         for (size_t j = 0; j < children.size(); j++)
-        {
             kill(children[j], SIGTERM);
-        }
     }
 
     if (_background == 0 || executionFailed)
@@ -626,23 +471,16 @@ void Command::execute()
         for (size_t j = children.size(); j > 0; j--)
         {
             pid_t result;
-
             do
             {
                 result = waitpid(children[j - 1], NULL, 0);
             }
             while (result == -1 && errno == EINTR);
-
-            if (result == -1)
-            {
-                perror("waitpid");
-            }
+            if (result == -1) perror("waitpid");
         }
     }
-
     clear();
 }
-
 void Command::prompt()
 {
     std::string input;
