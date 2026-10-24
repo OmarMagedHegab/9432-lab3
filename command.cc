@@ -37,6 +37,34 @@ void parse(std::vector<Token> &tokens)
     for (size_t i = 0; i < tokens.size(); i++)
     {
         Token token = tokens[i];
+	bool isRedirection =
+            token.type == TOKEN_REDIRECT ||
+            token.type == TOKEN_APPEND ||
+            token.type == TOKEN_INPUT ||
+            token.type == TOKEN_ERROR ||
+            token.type == TOKEN_REDIRECT_AND_ERROR;
+
+        if (isRedirection)
+        {
+            if (i + 1 >= tokens.size() ||
+                (tokens[i + 1].type != TOKEN_ARGUMENT &&
+                 tokens[i + 1].type != TOKEN_COMMAND))
+            {
+                fprintf(stderr, "Syntax error: expected filename after %s\n", token.value.c_str());
+
+                for (int j = 0; j < currentSimpleCommand->_numberOfArguments; j++)
+                {
+                    free(currentSimpleCommand->_arguments[j]);
+                }
+
+                free(currentSimpleCommand->_arguments);
+                delete currentSimpleCommand;
+
+                currentCommand.clear();
+
+                return;
+            }
+        }
 
         switch (token.type)
         {
@@ -46,6 +74,14 @@ void parse(std::vector<Token> &tokens)
                 break;
 
             case TOKEN_PIPE:
+		if (currentSimpleCommand->_numberOfArguments == 0)
+                {
+                    fprintf(stderr, "Syntax error: missing command before pipe\n");
+                    free(currentSimpleCommand->_arguments);
+                    delete currentSimpleCommand;
+                    currentCommand.clear();
+                    return;
+                }
                 currentCommand.insertSimpleCommand(currentSimpleCommand);
                 currentSimpleCommand = new SimpleCommand();
                 break;
@@ -84,6 +120,15 @@ void parse(std::vector<Token> &tokens)
                 break;
 
             case TOKEN_EOF:
+		if (currentSimpleCommand->_numberOfArguments == 0 &&
+                    currentCommand._numberOfSimpleCommands > 0)
+                {
+                    fprintf(stderr, "Syntax error: missing command after pipe\n");
+                    free(currentSimpleCommand->_arguments);
+                    delete currentSimpleCommand;
+                    currentCommand.clear();
+                    return;
+                }
                 if (currentSimpleCommand->_numberOfArguments > 0)
                 {
                     currentCommand.insertSimpleCommand(currentSimpleCommand);
@@ -169,7 +214,7 @@ void Command::clear()
         }
 
         free(_simpleCommands[i]->_arguments);
-        free(_simpleCommands[i]);
+        delete _simpleCommands[i];
     }
 
     if (_outFile)
