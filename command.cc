@@ -28,6 +28,7 @@
 #include "command.h"
 #include "tokenizer.h"
 #include <errno.h>
+
 void parse(std::vector<Token> &tokens)
 {
     Command &currentCommand = Command::_currentCommand;
@@ -43,9 +44,55 @@ void parse(std::vector<Token> &tokens)
         currentCommand.clear();
     };
 
+    std::vector<Token> mergedTokens;
+    bool inQuotes = false;
+    std::string currentQuotedString = "";
+    Token mergedTokenTemplate;
+
     for (size_t i = 0; i < tokens.size(); i++)
     {
-        Token token = tokens[i];
+        if (!inQuotes)
+        {
+            if ((tokens[i].type == TOKEN_ARGUMENT || tokens[i].type == TOKEN_COMMAND) &&
+                tokens[i].value.front() == '"')
+            {
+                if (tokens[i].value.back() == '"' && tokens[i].value.length() > 1)
+                {
+                    Token t = tokens[i];
+                    t.value = t.value.substr(1, t.value.length() - 2); 
+                    mergedTokens.push_back(t);
+                }
+                else
+                {
+                    inQuotes = true;
+                    mergedTokenTemplate = tokens[i];
+                    currentQuotedString = tokens[i].value.substr(1); 
+                }
+            }
+            else
+            {
+                mergedTokens.push_back(tokens[i]);
+            }
+        }
+        else
+        {
+            if (tokens[i].value.back() == '"')
+            {
+                currentQuotedString += " " + tokens[i].value.substr(0, tokens[i].value.length() - 1);
+                mergedTokenTemplate.value = currentQuotedString;
+                mergedTokens.push_back(mergedTokenTemplate);
+                inQuotes = false;
+            }
+            else
+            {
+                currentQuotedString += " " + tokens[i].value;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < mergedTokens.size(); i++)
+    {
+        Token token = mergedTokens[i];
         bool isRedirection =
             token.type == TOKEN_REDIRECT || token.type == TOKEN_APPEND ||
             token.type == TOKEN_INPUT || token.type == TOKEN_ERROR ||
@@ -53,9 +100,9 @@ void parse(std::vector<Token> &tokens)
 
         if (isRedirection)
         {
-            if (i + 1 >= tokens.size() ||
-                (tokens[i + 1].type != TOKEN_ARGUMENT &&
-                 tokens[i + 1].type != TOKEN_COMMAND))
+            if (i + 1 >= mergedTokens.size() ||
+                (mergedTokens[i + 1].type != TOKEN_ARGUMENT &&
+                 mergedTokens[i + 1].type != TOKEN_COMMAND))
             {
                 std::string message = "expected filename after " + token.value;
                 syntaxError(message.c_str());
@@ -95,32 +142,32 @@ void parse(std::vector<Token> &tokens)
                 break;
 
             case TOKEN_REDIRECT:
-                currentCommand._outFile = strdup(tokens[++i].value.c_str());
+                currentCommand._outFile = strdup(mergedTokens[++i].value.c_str());
                 break;
 
             case TOKEN_APPEND:
-                currentCommand._outFile = strdup(tokens[++i].value.c_str());
+                currentCommand._outFile = strdup(mergedTokens[++i].value.c_str());
                 currentCommand._append = 1;
                 break;
 
             case TOKEN_INPUT:
-                currentCommand._inputFile = strdup(tokens[++i].value.c_str());
+                currentCommand._inputFile = strdup(mergedTokens[++i].value.c_str());
                 break;
 
             case TOKEN_ERROR:
-                currentCommand._errFile = strdup(tokens[++i].value.c_str());
+                currentCommand._errFile = strdup(mergedTokens[++i].value.c_str());
                 break;
 
             case TOKEN_REDIRECT_AND_ERROR:
-                currentCommand._outFile = strdup(tokens[++i].value.c_str());
-                currentCommand._errFile = strdup(tokens[i].value.c_str());
+                currentCommand._outFile = strdup(mergedTokens[++i].value.c_str());
+                currentCommand._errFile = strdup(mergedTokens[i].value.c_str());
                 currentCommand._out_error = 1;
                 currentCommand._append = 1;
                 break;
 
             case TOKEN_BACKGROUND:
                 if (currentSimpleCommand->_numberOfArguments == 0 ||
-                    i + 1 >= tokens.size() || tokens[i + 1].type != TOKEN_EOF)
+                    i + 1 >= mergedTokens.size() || mergedTokens[i + 1].type != TOKEN_EOF)
                 {
                     syntaxError("& must follow a command and end the line");
                     return;
@@ -151,6 +198,7 @@ void parse(std::vector<Token> &tokens)
         }
     }
 }
+
 SimpleCommand::SimpleCommand()
 {
     _numberOfAvailableArguments = 5;
