@@ -664,8 +664,35 @@ void Command::prompt()
 Command Command::_currentCommand;
 SimpleCommand *Command::_currentSimpleCommand;
 
+extern "C" void sigchld_handler(int sig) {
+    int pid;
+    int status;
+    int saved_errno = errno;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        int fd = open("process.log", O_WRONLY | O_CREAT | O_APPEND, 0666);
+        if (fd >= 0) {
+            char log_msg[100];
+            int len = snprintf(log_msg, sizeof(log_msg), "Background process %d terminated.\n", pid);
+            write(fd, log_msg, len);
+            close(fd);
+        }
+    }
+    errno = saved_errno;
+}
+
 int main()
 {
+    if (signal(SIGINT, SIG_IGN) == SIG_ERR) {
+        perror("signal");
+        return 1;
+    }
+    
+    if (signal(SIGCHLD, sigchld_handler) == SIG_ERR) {
+        perror("signal");
+        return 1;
+    }
+
     Command::_currentCommand.prompt();
     return 0;
 }
