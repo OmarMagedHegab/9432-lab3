@@ -549,7 +549,7 @@ void Command::execute()
                 result = waitpid(children[j - 1], NULL, 0);
             }
             while (result == -1 && errno == EINTR);
-            if (result == -1) perror("waitpid");
+            if (result == -1 && errno != ECHILD) perror("waitpid");
         }
     }
     clear();
