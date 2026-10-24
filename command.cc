@@ -28,7 +28,6 @@
 #include "command.h"
 #include "tokenizer.h"
 
-
 void parse(std::vector<Token> &tokens)
 {
     Command &currentCommand = Command::_currentCommand;
@@ -37,7 +36,8 @@ void parse(std::vector<Token> &tokens)
     for (size_t i = 0; i < tokens.size(); i++)
     {
         Token token = tokens[i];
-	bool isRedirection =
+
+        bool isRedirection =
             token.type == TOKEN_REDIRECT ||
             token.type == TOKEN_APPEND ||
             token.type == TOKEN_INPUT ||
@@ -61,7 +61,36 @@ void parse(std::vector<Token> &tokens)
                 delete currentSimpleCommand;
 
                 currentCommand.clear();
+                return;
+            }
 
+            bool redirectsOutput =
+                token.type == TOKEN_REDIRECT ||
+                token.type == TOKEN_APPEND ||
+                token.type == TOKEN_REDIRECT_AND_ERROR;
+
+            bool redirectsInput =
+                token.type == TOKEN_INPUT;
+
+            bool redirectsError =
+                token.type == TOKEN_ERROR ||
+                token.type == TOKEN_REDIRECT_AND_ERROR;
+
+            if ((redirectsOutput && currentCommand._outFile != NULL) ||
+                (redirectsInput && currentCommand._inputFile != NULL) ||
+                (redirectsError && currentCommand._errFile != NULL))
+            {
+                fprintf(stderr, "Syntax error: repeated redirection for the same stream\n");
+
+                for (int j = 0; j < currentSimpleCommand->_numberOfArguments; j++)
+                {
+                    free(currentSimpleCommand->_arguments[j]);
+                }
+
+                free(currentSimpleCommand->_arguments);
+                delete currentSimpleCommand;
+
+                currentCommand.clear();
                 return;
             }
         }
@@ -74,7 +103,7 @@ void parse(std::vector<Token> &tokens)
                 break;
 
             case TOKEN_PIPE:
-		if (currentSimpleCommand->_numberOfArguments == 0)
+                if (currentSimpleCommand->_numberOfArguments == 0)
                 {
                     fprintf(stderr, "Syntax error: missing command before pipe\n");
                     free(currentSimpleCommand->_arguments);
@@ -116,11 +145,29 @@ void parse(std::vector<Token> &tokens)
                 break;
 
             case TOKEN_BACKGROUND:
+                if (currentSimpleCommand->_numberOfArguments == 0 ||
+                    i + 1 >= tokens.size() ||
+                    tokens[i + 1].type != TOKEN_EOF)
+                {
+                    fprintf(stderr, "Syntax error: & must follow a command and end the line\n");
+
+                    for (int j = 0; j < currentSimpleCommand->_numberOfArguments; j++)
+                    {
+                        free(currentSimpleCommand->_arguments[j]);
+                    }
+
+                    free(currentSimpleCommand->_arguments);
+                    delete currentSimpleCommand;
+
+                    currentCommand.clear();
+                    return;
+                }
+
                 currentCommand._background = 1;
                 break;
 
             case TOKEN_EOF:
-		if (currentSimpleCommand->_numberOfArguments == 0 &&
+                if (currentSimpleCommand->_numberOfArguments == 0 &&
                     currentCommand._numberOfSimpleCommands > 0)
                 {
                     fprintf(stderr, "Syntax error: missing command after pipe\n");
@@ -129,6 +176,7 @@ void parse(std::vector<Token> &tokens)
                     currentCommand.clear();
                     return;
                 }
+
                 if (currentSimpleCommand->_numberOfArguments > 0)
                 {
                     currentCommand.insertSimpleCommand(currentSimpleCommand);
@@ -138,7 +186,7 @@ void parse(std::vector<Token> &tokens)
                     free(currentSimpleCommand->_arguments);
                     delete currentSimpleCommand;
                 }
-                
+
                 if (currentCommand._numberOfSimpleCommands > 0)
                 {
                     currentCommand.execute();
@@ -147,12 +195,11 @@ void parse(std::vector<Token> &tokens)
                 {
                     currentCommand.clear();
                 }
+
                 return;
         }
     }
-}
-     
-
+}     
 
 SimpleCommand::SimpleCommand()
 {
