@@ -27,6 +27,7 @@
 #include <sstream>
 #include "command.h"
 #include "tokenizer.h"
+#include <errno.h>
 
 void parse(std::vector<Token> &tokens)
 {
@@ -316,78 +317,69 @@ void Command::print()
 
 void Command::execute()
 {
-    print();
-
     if (_numberOfSimpleCommands == 0)
     {
+        clear();
         return;
     }
 
-    if (strcmp(_simpleCommands[0]->_arguments[0], "exit") == 0)
-    {
-        printf("Good bye!!\n");
-        exit(0);
-    }
+    print();
+    fflush(stdout);
 
-    if (strcmp(_simpleCommands[0]->_arguments[0], "cd") == 0)
+    auto changeDirectory = [](SimpleCommand *command) -> int
     {
-        if (_simpleCommands[0]->_numberOfArguments > 2)
+        if (command->_numberOfArguments > 2)
         {
             fprintf(stderr, "cd: too many arguments\n");
+            return 1;
         }
-        else
+
+        const char *directory = command->_arguments[1];
+
+        if (directory == NULL)
         {
-            const char *directory = _simpleCommands[0]->_arguments[1];
-
-            if (directory == NULL)
-            {
-                directory = getenv("HOME");
-            }
-
-            if (directory == NULL)
-            {
-                fprintf(stderr, "cd: HOME is not set\n");
-            }
-            else if (chdir(directory) == -1)
-            {
-                perror("cd");
-            }
+            directory = getenv("HOME");
         }
 
-        clear();
-        return;
-    }
+        if (directory == NULL)
+        {
+            fprintf(stderr, "cd: HOME is not set\n");
+            return 1;
+        }
 
-    int original_keyboard = dup(0);
-    int original_screen = dup(1);
-    int original_error = dup(2);
+        if (chdir(directory) == -1)
+        {
+            perror("cd");
+            return 1;
+        }
 
-    if (original_keyboard == -1 ||
-        original_screen == -1 ||
-        original_error == -1)
+        return 0;
+    };
+
+    int current_input = -1;
+    int final_output = -1;
+    int error_output = -1;
+
+    auto closeDescriptors = [&]()
     {
-        perror("dup");
-
-        if (original_keyboard != -1)
+        if (current_input != -1)
         {
-            close(original_keyboard);
+            close(current_input);
+            current_input = -1;
         }
 
-        if (original_screen != -1)
+        if (final_output != -1)
         {
-            close(original_screen);
+            close(final_output);
+            final_output = -1;
         }
 
-        if (original_error != -1)
+        if (error_output != -1)
         {
-            close(original_error);
+            close(error_output);
+            error_output = -1;
         }
-
-        clear();
-        return;
-    }
-
-    int current_input;
+    };
 
     if (_inputFile != NULL)
     {
@@ -395,149 +387,257 @@ void Command::execute()
     }
     else
     {
-        current_input = dup(original_keyboard);
+        current_input = dup(STDIN_FILENO);
     }
 
     if (current_input == -1)
     {
-        if (_inputFile != NULL)
+        perror(_inputFile != NULL ? _inputFile : "dup input");
+        closeDescriptors();
+        clear();
+        return;
+    }
+
+    if (_outFile != NULL)
+    {
+        int flags = O_WRONLY | O_CREAT;
+
+        if (_append == 1)
         {
-            perror(_inputFile);
+            flags |= O_APPEND;
         }
         else
         {
-            perror("dup input");
+            flags |= O_TRUNC;
+        }
+
+        final_output = open(_outFile, flags, 0666);
+    }
+    else
+    {
+        final_output = dup(STDOUT_FILENO);
+    }
+
+    if (final_output == -1)
+    {
+        perror(_outFile != NULL ? _outFile : "dup output");
+        closeDescriptors();
+        clear();
+        return;
+    }
+
+    if (_out_error == 1)
+    {
+        error_output = dup(final_output);
+    }
+    else if (_errFile != NULL)
+    {
+        error_output = open(
+            _errFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    }
+    else
+    {
+        error_output = dup(STDERR_FILENO);
+    }
+
+    if (error_output == -1)
+    {
+        perror(_errFile != NULL ? _errFile : "dup error");
+        closeDescriptors();
+        clear();
+        return;
+    }
+
+    bool isExit =
+        strcmp(_simpleCommands[0]->_arguments[0], "exit") == 0;
+
+    bool isCd =
+        strcmp(_simpleCommands[0]->_arguments[0], "cd") == 0;
+
+    if (_numberOfSimpleCommands == 1 && (isExit || isCd))
+    {
+        int original_keyboard = dup(STDIN_FILENO);
+        int original_screen = dup(STDOUT_FILENO);
+        int original_error = dup(STDERR_FILENO);
+
+        if (original_keyboard == -1 ||
+            original_screen == -1 ||
+            original_error == -1)
+        {
+            perror("dup");
+
+            if (original_keyboard != -1) close(original_keyboard);
+            if (original_screen != -1) close(original_screen);
+            if (original_error != -1) close(original_error);
+
+            closeDescriptors();
+            clear();
+            return;
+        }
+
+        bool redirected =
+            dup2(current_input, STDIN_FILENO) != -1 &&
+            dup2(final_output, STDOUT_FILENO) != -1 &&
+            dup2(error_output, STDERR_FILENO) != -1;
+
+        if (!redirected)
+        {
+            perror("dup2");
+        }
+        else if (isExit)
+        {
+            printf("Good bye!!\n");
+        }
+        else
+        {
+            changeDirectory(_simpleCommands[0]);
+        }
+
+        fflush(stdout);
+        fflush(stderr);
+
+        if (dup2(original_keyboard, STDIN_FILENO) == -1)
+        {
+            perror("restore input");
+        }
+
+        if (dup2(original_screen, STDOUT_FILENO) == -1)
+        {
+            perror("restore output");
+        }
+
+        if (dup2(original_error, STDERR_FILENO) == -1)
+        {
+            perror("restore error");
         }
 
         close(original_keyboard);
         close(original_screen);
         close(original_error);
 
+        closeDescriptors();
         clear();
+
+        if (isExit && redirected)
+        {
+            exit(0);
+        }
+
         return;
     }
 
-    int child_id;
+    std::vector<pid_t> children;
+    bool executionFailed = false;
 
     for (int i = 0; i < _numberOfSimpleCommands; i++)
     {
-        dup2(current_input, 0);
-        close(current_input);
+        int next_pipe[2] = {-1, -1};
+        bool hasNextCommand = i < _numberOfSimpleCommands - 1;
 
-        int current_output;
-
-        if (i == _numberOfSimpleCommands - 1)
+        if (hasNextCommand && pipe(next_pipe) == -1)
         {
-            if (_outFile != NULL)
-            {
-                if (_append == 1)
-                {
-                    current_output = open(
-                        _outFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
-                }
-                else
-                {
-                    current_output = open(
-                        _outFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-                }
-
-                if (current_output == -1)
-                {
-                    perror(_outFile);
-
-                    dup2(original_keyboard, 0);
-                    dup2(original_screen, 1);
-                    dup2(original_error, 2);
-
-                    close(original_keyboard);
-                    close(original_screen);
-                    close(original_error);
-
-                    clear();
-                    return;
-                }
-            }
-            else
-            {
-                current_output = dup(original_screen);
-            }
-
-            if (_errFile != NULL)
-            {
-                int error_output;
-
-                if (_append == 1)
-                {
-                    error_output = open(
-                        _errFile, O_WRONLY | O_CREAT | O_APPEND, 0666);
-                }
-                else
-                {
-                    error_output = open(
-                        _errFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-                }
-
-                if (error_output == -1)
-                {
-                    perror(_errFile);
-
-                    if (current_output != -1)
-                    {
-                        close(current_output);
-                    }
-
-                    dup2(original_keyboard, 0);
-                    dup2(original_screen, 1);
-                    dup2(original_error, 2);
-
-                    close(original_keyboard);
-                    close(original_screen);
-                    close(original_error);
-
-                    clear();
-                    return;
-                }
-
-                dup2(error_output, 2);
-                close(error_output);
-            }
-        }
-        else
-        {
-            int my_pipe[2];
-            pipe(my_pipe);
-
-            current_output = my_pipe[1];
-            current_input = my_pipe[0];
+            perror("pipe");
+            executionFailed = true;
+            break;
         }
 
-        dup2(current_output, 1);
-        close(current_output);
+        pid_t child_id = fork();
 
-        child_id = fork();
+        if (child_id == -1)
+        {
+            perror("fork");
+
+            if (next_pipe[0] != -1) close(next_pipe[0]);
+            if (next_pipe[1] != -1) close(next_pipe[1]);
+
+            executionFailed = true;
+            break;
+        }
 
         if (child_id == 0)
         {
-            execvp(
-                _simpleCommands[i]->_arguments[0],
-                _simpleCommands[i]->_arguments);
+            signal(SIGINT, SIG_DFL);
 
-            perror(_simpleCommands[i]->_arguments[0]);
+            if (next_pipe[0] != -1)
+            {
+                close(next_pipe[0]);
+            }
+
+            int current_output =
+                hasNextCommand ? next_pipe[1] : final_output;
+
+            if (dup2(current_input, STDIN_FILENO) == -1 ||
+                dup2(current_output, STDOUT_FILENO) == -1 ||
+                dup2(error_output, STDERR_FILENO) == -1)
+            {
+                perror("dup2");
+                _exit(1);
+            }
+
+            if (next_pipe[1] != -1)
+            {
+                close(next_pipe[1]);
+            }
+
+            closeDescriptors();
+
+            SimpleCommand *command = _simpleCommands[i];
+
+            if (strcmp(command->_arguments[0], "exit") == 0)
+            {
+                _exit(0);
+            }
+
+            if (strcmp(command->_arguments[0], "cd") == 0)
+            {
+                _exit(changeDirectory(command));
+            }
+
+            execvp(command->_arguments[0], command->_arguments);
+
+            perror(command->_arguments[0]);
             _exit(127);
+        }
+
+        children.push_back(child_id);
+
+        close(current_input);
+        current_input = -1;
+
+        if (hasNextCommand)
+        {
+            close(next_pipe[1]);
+            current_input = next_pipe[0];
         }
     }
 
-    dup2(original_keyboard, 0);
-    dup2(original_screen, 1);
-    dup2(original_error, 2);
+    closeDescriptors();
 
-    close(original_keyboard);
-    close(original_screen);
-    close(original_error);
-
-    if (_background == 0)
+    if (executionFailed)
     {
-        waitpid(child_id, NULL, 0);
+        for (size_t j = 0; j < children.size(); j++)
+        {
+            kill(children[j], SIGTERM);
+        }
+    }
+
+    if (_background == 0 || executionFailed)
+    {
+        for (size_t j = children.size(); j > 0; j--)
+        {
+            pid_t result;
+
+            do
+            {
+                result = waitpid(children[j - 1], NULL, 0);
+            }
+            while (result == -1 && errno == EINTR);
+
+            if (result == -1)
+            {
+                perror("waitpid");
+            }
+        }
     }
 
     clear();

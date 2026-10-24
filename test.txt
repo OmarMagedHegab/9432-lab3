@@ -1,0 +1,13 @@
+total 628
+drwxrwxr-x  3 os os   4096 Oct 22 13:29 .
+drwxr-x--- 17 os os   4096 Oct 22 09:10 ..
+drwxrwxr-x  7 os os   4096 Oct 22 11:23 .git
+-rw-rw-r--  1 os os    530 Oct 22 10:58 Makefile
+-rw-rw-r--  1 os os   8381 Oct 22 13:28 command.cc
+-rw-rw-r--  1 os os    649 Oct 24  2025 command.h
+-rw-rw-r--  1 os os 163680 Oct 22 13:28 command.o
+-rwxrwxr-x  1 os os 203144 Oct 22 13:28 myshell
+-rw-rw-r--  1 os os      0 Oct 22 13:29 test.txt
+-rw-rw-r--  1 os os   1954 Oct 24  2025 tokenizer.cc
+-rw-rw-r--  1 os os    456 Oct 24  2025 tokenizer.h
+-rw-rw-r--  1 os os 232912 Oct 22 10:58 tokenizer.o
